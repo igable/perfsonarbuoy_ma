@@ -113,6 +113,9 @@ use IO::Socket;
 use DB_File;
 use DBI;
 use Math::Int64 qw(uint64);
+use Net::RabbitMQ;
+use Data::Dumper;
+use JSON;
 
 my %options = (
     ADDFILE    => "a:",
@@ -994,9 +997,36 @@ sub add_session {
     my @vals = @{ $sess_summ{"${min_si}_${max_ei}"} };
     shift @vals;
     shift @vals;
+    
+    my $mq = Net::RabbitMQ->new();
+    $mq->connect("hostx", { user => "guest", password => "guest" });
+    $mq->channel_open(1);
+    
+    my $owpt_string =  owptstampi( $fttime );
+    my %measurement = (
+                'send_id', "$send_id",
+                'recv_id', "$recv_id",
+                'tspec_id', "$tspec_id",
+                'ti', "$owpt_string",
+                'timestamp', "$fttime",
+                'throughput', "$vals[0]",
+                'jitter', "$vals[1]",
+                'lost', "$vals[2]",
+                'sent', "$vals[3]"
+         );
+    
+    my $json = encode_json(\%measurement);
+    $mq->publish(1, "hello", $json);
+
+    $mq->disconnect();
+    syslog('debug',"Ian Log: $send_id, $recv_id, $tspec_id, owptstampi( $fttime ), $fttime, Vals:".Dumper(@vals));
+
+   
     if ( !( $rc = $sth->execute( $send_id, $recv_id, $tspec_id, owptstampi( $fttime ), $fttime, @vals ) ) ) {
         ldie "Insert $testname";
     }
+
+
 
     warn "ADD_SESSION: $testname: inserted $add_file"
         if defined( $verbose );
